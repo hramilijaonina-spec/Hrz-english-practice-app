@@ -1,4 +1,4 @@
-const CACHE_NAME = 'daily-english-v1';
+const CACHE_NAME = 'daily-english-v1.3';
 const ASSETS = [
   './index.html',
   './manifest.json',

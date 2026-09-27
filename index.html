@@ -75,7 +75,12 @@
     display: flex; align-items: center; justify-content: center;
     font-weight: 700; font-size: 14px; color: white; flex-shrink: 0;
   }
-  .brand-title { font-weight: 600; font-size: 15px; line-height: 1.2; }
+  .brand-title { font-weight: 600; font-size: 15px; line-height: 1.2; display: flex; align-items: center; gap: 6px; }
+  .version-badge {
+    font-size: 10px; font-weight: 700; color: var(--accent);
+    background: var(--surface-2); border: 1px solid var(--border);
+    padding: 1px 6px; border-radius: 8px; letter-spacing: 0.02em;
+  }
   .brand-sub { font-size: 12px; color: var(--text-dim); }
   .streak {
     display: flex; align-items: center; gap: 5px;
@@ -232,7 +237,7 @@
     <div class="brand">
       <div class="brand-mark">EN</div>
       <div>
-        <div class="brand-title">Daily English</div>
+        <div class="brand-title">Daily English <span class="version-badge" id="versionBadge"></span></div>
         <div class="brand-sub" id="subLine">Everyday conversation practice</div>
       </div>
     </div>
@@ -252,6 +257,7 @@
 </div>
 
 <script>
+const APP_VERSION = 'v1.3';
 const STORAGE_KEYS = {
   apiKey: 'de_api_key',
   history: 'de_history',
@@ -645,6 +651,7 @@ function openSettings() {
 settingsBtn.addEventListener('click', openSettings);
 
 // init
+document.getElementById('versionBadge').textContent = APP_VERSION;
 updateStreakUI();
 renderAllHistory();
 if (!apiKey) {
