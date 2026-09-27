@@ -125,6 +125,18 @@
   .play-btn:active { background: var(--surface-2); }
   .play-btn.playing { color: var(--accent); }
   .play-btn svg { width: 13px; height: 13px; flex-shrink: 0; }
+  .play-btn:disabled { opacity: 0.6; }
+  .msg-actions { gap: 4px; }
+  .phonetic-block {
+    margin-top: 6px; padding: 10px 12px; border-radius: 12px;
+    background: var(--surface); border: 1px dashed var(--border);
+    display: flex; flex-wrap: wrap; gap: 8px 12px; max-width: 100%;
+  }
+  .phonetic-block[hidden] { display: none; }
+  .ph-word { display: inline-flex; flex-direction: column; align-items: center; line-height: 1.25; }
+  .ph-en { font-size: 12px; color: var(--text-dim); }
+  .ph-fr { font-size: 15px; font-weight: 600; color: var(--accent); }
+  .ph-error { font-size: 13px; color: var(--danger); }
   .note {
     margin-top: 6px; padding: 8px 12px; border-radius: 10px;
     font-size: 13px; line-height: 1.4; max-width: 100%;
@@ -257,7 +269,7 @@
 </div>
 
 <script>
-const APP_VERSION = 'v1.3';
+const APP_VERSION = 'v1.4';
 const STORAGE_KEYS = {
   apiKey: 'de_api_key',
   history: 'de_history',
@@ -365,16 +377,27 @@ function renderMessage(role, content, extras) {
   bubble.textContent = content;
   row.appendChild(bubble);
 
-  if (role === 'bot' && ttsSupported) {
+  if (role === 'bot' && !(extras && extras.system)) {
     const actions = document.createElement('div');
     actions.className = 'msg-actions';
-    const playBtn = document.createElement('button');
-    playBtn.className = 'play-btn';
-    playBtn.innerHTML = playIconSvg();
-    playBtn.setAttribute('aria-label', 'Play');
-    playBtn.onclick = () => toggleSpeak(content, playBtn);
-    actions.appendChild(playBtn);
+    if (ttsSupported) {
+      const playBtn = document.createElement('button');
+      playBtn.className = 'play-btn';
+      playBtn.innerHTML = playIconSvg();
+      playBtn.setAttribute('aria-label', 'Play');
+      playBtn.onclick = () => toggleSpeak(content, playBtn);
+      actions.appendChild(playBtn);
+    }
+    const phBtn = document.createElement('button');
+    phBtn.className = 'play-btn';
+    phBtn.innerHTML = PHONETIC_LABEL;
+    const phBlock = document.createElement('div');
+    phBlock.className = 'phonetic-block';
+    phBlock.hidden = true;
+    phBtn.onclick = () => togglePhonetic(content, extras, phBtn, phBlock);
+    actions.appendChild(phBtn);
     row.appendChild(actions);
+    row.appendChild(phBlock);
   }
 
   if (extras && extras.correction) {
@@ -420,8 +443,101 @@ function renderAllHistory() {
   messagesEl.innerHTML = '';
   history.forEach(turn => {
     if (turn.role === 'user') renderMessage('user', turn.content);
-    else renderMessage('bot', turn.content, { correction: turn.correction, phrasal_verb: turn.phrasal_verb });
+    else renderMessage('bot', turn.content, turn);
   });
+  scrollToBottom();
+}
+
+// ---- Phonetic (French/Malagasy-style spelling, not IPA) ----
+const PHONETIC_LABEL = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 18h2.2l1.1-3h5.4l1.1 3H16L11 5H9L4 18zm4-5 1.9-5.3L11.9 13H8zm11-1a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"/></svg> Phonetic';
+const PHONETIC_HIDE_LABEL = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 18h2.2l1.1-3h5.4l1.1 3H16L11 5H9L4 18zm4-5 1.9-5.3L11.9 13H8zm11-1a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"/></svg> Hide';
+
+const PHONETIC_PROMPT = `You help a French- and Malagasy-speaking learner pronounce English.
+For the English text you receive, write how EACH word sounds, spelled with FRENCH spelling rules, so a French reader can read it aloud and sound close to English. Do NOT use IPA or any special phonetic symbols — only normal letters (accents like é, è, ï are fine).
+
+The learner's own examples, follow this style:
+- like → laïk
+- the → veu
+
+More guidance:
+- "ee"/"ea" sound → "i" (see → si), "oo" sound → "ou" (food → foud), "u" in "but" → "eu" (but → beut)
+- "w" → "ou" (what → ouat, we → oui), "h" at the start is heard → "h" (hello → hèlo)
+- Keep it short and simple, lowercase, one phonetic per word.
+
+Return ONLY a JSON array of pairs, no markdown, no extra text:
+[["Word","phonetic"], ...]
+Keep every word of the text in order. Put punctuation attached to its word in the first element (e.g. "morning,"), never in the phonetic.`;
+
+function renderPhoneticBlock(block, pairs) {
+  block.innerHTML = '';
+  pairs.forEach(([word, ph]) => {
+    const w = document.createElement('span');
+    w.className = 'ph-word';
+    const en = document.createElement('span');
+    en.className = 'ph-en';
+    en.textContent = word;
+    const fr = document.createElement('span');
+    fr.className = 'ph-fr';
+    fr.textContent = ph || '';
+    w.appendChild(en);
+    w.appendChild(fr);
+    block.appendChild(w);
+  });
+}
+
+async function fetchPhonetic(text) {
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true',
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-5-20250929',
+      max_tokens: 1500,
+      system: PHONETIC_PROMPT,
+      messages: [{ role: 'user', content: text }],
+    }),
+  });
+  if (!res.ok) throw new Error(`API error ${res.status}`);
+  const data = await res.json();
+  let raw = (data.content || []).map(b => b.text || '').join('').trim();
+  raw = raw.replace(/^```json\s*/i, '').replace(/^```\s*/, '').replace(/```\s*$/, '');
+  const start = raw.indexOf('['), end = raw.lastIndexOf(']');
+  const pairs = JSON.parse(raw.slice(start, end + 1));
+  if (!Array.isArray(pairs)) throw new Error('Bad format');
+  return pairs;
+}
+
+async function togglePhonetic(text, turn, btn, block) {
+  if (!block.hidden) {
+    block.hidden = true;
+    btn.innerHTML = PHONETIC_LABEL;
+    return;
+  }
+  if (turn && Array.isArray(turn.phonetic)) {
+    renderPhoneticBlock(block, turn.phonetic);
+  } else {
+    if (!apiKey) { openSettings(); return; }
+    btn.disabled = true;
+    btn.textContent = 'Loading…';
+    try {
+      const pairs = await fetchPhonetic(text);
+      if (turn) { turn.phonetic = pairs; saveHistory(); }
+      renderPhoneticBlock(block, pairs);
+    } catch (e) {
+      btn.disabled = false;
+      btn.innerHTML = PHONETIC_LABEL;
+      block.hidden = false;
+      block.innerHTML = '<span class="ph-error">Could not load the phonetic, tap again to retry.</span>';
+      return;
+    }
+    btn.disabled = false;
+  }
+  block.hidden = false;
+  btn.innerHTML = PHONETIC_HIDE_LABEL;
   scrollToBottom();
 }
 
@@ -430,7 +546,7 @@ async function callClaude(userText) {
     if (t.role === 'user') return { role: 'user', content: t.content };
     return { role: 'assistant', content: JSON.stringify({ reply: t.content, correction: t.correction || null, phrasal_verb: t.phrasal_verb || null }) };
   });
-  apiHistory.push({ role: 'user', content: userText });
+  // (the user's latest message is already the last item of history)
 
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -489,13 +605,15 @@ async function sendMessage() {
   try {
     const result = await callClaude(text);
     removeTyping();
-    history.push({ role: 'assistant', content: result.reply, correction: result.correction, phrasal_verb: result.phrasal_verb });
-    renderMessage('bot', result.reply, result);
+    const turn = { role: 'assistant', content: result.reply, correction: result.correction, phrasal_verb: result.phrasal_verb };
+    history.push(turn);
+    renderMessage('bot', result.reply, turn);
     saveHistory();
     registerActivity();
   } catch (err) {
     removeTyping();
-    renderMessage('bot', `Something went wrong: ${err.message}. Check your API key in settings.`);
+    history.pop(); // drop the unanswered message so the next try stays clean
+    renderMessage('bot', `Something went wrong: ${err.message}. Check your API key in settings.`, { system: true });
   } finally {
     sendBtn.disabled = false;
   }
@@ -594,7 +712,7 @@ if (SpeechRecognitionCtor) {
 
   recognizer.onerror = (event) => {
     if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
-      renderMessage('bot', "I need microphone permission to hear you — check your browser/site settings and try again.");
+      renderMessage('bot', "I need microphone permission to hear you — check your browser/site settings and try again.", { system: true });
     }
   };
 
