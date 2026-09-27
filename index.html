@@ -111,6 +111,15 @@
     background: var(--surface-2); border: 1px solid var(--border);
     border-bottom-left-radius: 4px;
   }
+  .msg-actions { display: flex; margin-top: 4px; }
+  .play-btn {
+    display: flex; align-items: center; gap: 5px;
+    background: none; border: none; color: var(--text-dim);
+    font-size: 12px; padding: 3px 6px; cursor: pointer; border-radius: 8px;
+  }
+  .play-btn:active { background: var(--surface-2); }
+  .play-btn.playing { color: var(--accent); }
+  .play-btn svg { width: 13px; height: 13px; flex-shrink: 0; }
   .note {
     margin-top: 6px; padding: 8px 12px; border-radius: 10px;
     font-size: 13px; line-height: 1.4; max-width: 100%;
@@ -350,6 +359,18 @@ function renderMessage(role, content, extras) {
   bubble.textContent = content;
   row.appendChild(bubble);
 
+  if (role === 'bot' && ttsSupported) {
+    const actions = document.createElement('div');
+    actions.className = 'msg-actions';
+    const playBtn = document.createElement('button');
+    playBtn.className = 'play-btn';
+    playBtn.innerHTML = playIconSvg();
+    playBtn.setAttribute('aria-label', 'Play');
+    playBtn.onclick = () => toggleSpeak(content, playBtn);
+    actions.appendChild(playBtn);
+    row.appendChild(actions);
+  }
+
   if (extras && extras.correction) {
     const note = document.createElement('div');
     note.className = 'note correction';
@@ -485,6 +506,54 @@ textInput.addEventListener('keydown', (e) => {
   }
 });
 sendBtn.addEventListener('click', sendMessage);
+
+// Text-to-speech (read bot replies aloud)
+const ttsSupported = 'speechSynthesis' in window;
+let currentUtterance = null;
+let currentPlayBtn = null;
+
+function playIconSvg() {
+  return `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg> Listen`;
+}
+function pauseIconSvg() {
+  return `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg> Stop`;
+}
+
+function resetPlayBtn(btn) {
+  btn.innerHTML = playIconSvg();
+  btn.classList.remove('playing');
+}
+
+function toggleSpeak(text, btn) {
+  if (currentUtterance && currentPlayBtn === btn) {
+    window.speechSynthesis.cancel();
+    resetPlayBtn(btn);
+    currentUtterance = null;
+    currentPlayBtn = null;
+    return;
+  }
+  window.speechSynthesis.cancel();
+  if (currentPlayBtn) resetPlayBtn(currentPlayBtn);
+
+  const utter = new SpeechSynthesisUtterance(text);
+  utter.lang = 'en-US';
+  utter.rate = 0.95;
+  utter.onend = () => {
+    resetPlayBtn(btn);
+    currentUtterance = null;
+    currentPlayBtn = null;
+  };
+  utter.onerror = () => {
+    resetPlayBtn(btn);
+    currentUtterance = null;
+    currentPlayBtn = null;
+  };
+  currentUtterance = utter;
+  currentPlayBtn = btn;
+  btn.innerHTML = pauseIconSvg();
+  btn.classList.add('playing');
+  window.speechSynthesis.speak(utter);
+}
 
 // Speech-to-text (Web Speech API — supported on Chrome/Edge/Safari 14.5+;
 // gracefully hidden where unsupported, e.g. some iOS Safari versions).
