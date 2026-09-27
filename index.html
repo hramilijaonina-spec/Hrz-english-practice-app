@@ -46,8 +46,8 @@
       --danger: #DC2626;
     }
   }
-  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-  html, body { height: 100%; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; min-width: 0; }
+  html, body { height: 100%; width: 100%; overflow-x: hidden; }
   body {
     margin: 0;
     background: var(--bg);
@@ -57,7 +57,7 @@
     flex-direction: column;
     overflow: hidden;
   }
-  #app { display: flex; flex-direction: column; height: 100dvh; }
+  #app { display: flex; flex-direction: column; height: 100dvh; width: 100%; max-width: 100vw; overflow: hidden; }
 
   header {
     padding: calc(12px + var(--safe-top)) 16px 12px;
@@ -157,6 +157,21 @@
     flex-shrink: 0; transition: opacity 0.15s;
   }
   #sendBtn:disabled { opacity: 0.4; }
+  #micBtn {
+    width: 42px; height: 42px; border-radius: 50%; border: 1px solid var(--border);
+    background: var(--surface-2); color: var(--text); font-size: 17px;
+    display: flex; align-items: center; justify-content: center; cursor: pointer;
+    flex-shrink: 0; transition: background 0.15s, color 0.15s, border-color 0.15s;
+  }
+  #micBtn.listening {
+    background: var(--danger); color: white; border-color: var(--danger);
+    animation: pulse 1.2s infinite;
+  }
+  #micBtn[hidden] { display: none; }
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--danger) 45%, transparent); }
+    50% { box-shadow: 0 0 0 8px color-mix(in srgb, var(--danger) 0%, transparent); }
+  }
 
   .empty-state {
     margin: auto; text-align: center; color: var(--text-dim); padding: 32px;
@@ -222,6 +237,7 @@
 
   <div id="composer">
     <textarea id="textInput" rows="1" placeholder="Type in English…" autocomplete="off" autocapitalize="sentences"></textarea>
+    <button id="micBtn" title="Speak" hidden>🎤</button>
     <button id="sendBtn">➤</button>
   </div>
 </div>
@@ -261,6 +277,7 @@ let streakData = JSON.parse(localStorage.getItem(STORAGE_KEYS.streak) || '{"stre
 const messagesEl = document.getElementById('messages');
 const textInput = document.getElementById('textInput');
 const sendBtn = document.getElementById('sendBtn');
+const micBtn = document.getElementById('micBtn');
 const streakCountEl = document.getElementById('streakCount');
 const settingsBtn = document.getElementById('settingsBtn');
 const subLine = document.getElementById('subLine');
@@ -468,6 +485,60 @@ textInput.addEventListener('keydown', (e) => {
   }
 });
 sendBtn.addEventListener('click', sendMessage);
+
+// Speech-to-text (Web Speech API — supported on Chrome/Edge/Safari 14.5+;
+// gracefully hidden where unsupported, e.g. some iOS Safari versions).
+const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
+let recognizer = null;
+let isListening = false;
+
+if (SpeechRecognitionCtor) {
+  micBtn.hidden = false;
+  recognizer = new SpeechRecognitionCtor();
+  recognizer.lang = 'en-US';
+  recognizer.continuous = false;
+  recognizer.interimResults = true;
+
+  let baseText = '';
+
+  recognizer.onstart = () => {
+    isListening = true;
+    baseText = textInput.value ? textInput.value.trim() + ' ' : '';
+    micBtn.classList.add('listening');
+  };
+
+  recognizer.onresult = (event) => {
+    let transcript = '';
+    for (let i = 0; i < event.results.length; i++) {
+      transcript += event.results[i][0].transcript;
+    }
+    textInput.value = baseText + transcript;
+    textInput.style.height = 'auto';
+    textInput.style.height = Math.min(textInput.scrollHeight, 120) + 'px';
+  };
+
+  recognizer.onerror = (event) => {
+    if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+      renderMessage('bot', "I need microphone permission to hear you — check your browser/site settings and try again.");
+    }
+  };
+
+  recognizer.onend = () => {
+    isListening = false;
+    micBtn.classList.remove('listening');
+  };
+
+  micBtn.addEventListener('click', () => {
+    if (isListening) {
+      recognizer.stop();
+    } else {
+      textInput.focus();
+      try { recognizer.start(); } catch (e) { /* already started */ }
+    }
+  });
+} else {
+  micBtn.hidden = true;
+}
 
 // Settings modal
 function openSettings() {
